@@ -63,7 +63,7 @@ class GameView(context: Context) : View(context) {
 
         for (i in 0..4) {
             for (j in 0..9) {
-                enemies.add(RectF(80f + j * 60, 400f + i * 60, 130f + j * 60, 450f + i * 60))
+                enemies.add(RectF(80f + j * 60, 100f + i * 60, 130f + j * 60, 150f + i * 60))
             }
         }
         enemyShootHandler.sendEmptyMessage(0)
@@ -246,7 +246,8 @@ class GameView(context: Context) : View(context) {
         enemies.clear()
         for (i in 0..4) {
             for (j in 0..9) {
-                enemies.add(RectF(80f + j * 60, 400f + i * 60, 130f + j * 60, 450f + i * 60))
+                // Cambiar 400f a 100f para mover los enemigos más arriba
+                enemies.add(RectF(80f + j * 60, 100f + i * 60, 130f + j * 60, 150f + i * 60))
             }
         }
         enemyShootHandler.sendEmptyMessage(0) // Reiniciar el enemyShootHandler
