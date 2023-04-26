@@ -1,4 +1,5 @@
 package com.josejordan.spaceinvaders
+
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
@@ -17,28 +18,39 @@ class GameView(context: Context) : View(context) {
     private var player: RectF
     private var enemies = mutableListOf<RectF>()
     private var bullets = mutableListOf<Pair<RectF, Float>>() // Cambiar a una lista de Pares
-
-
     private val playerSpeed = 10f
     private var playerDirection = 0
 
-    private val enemySpeed = 2f
     private var enemyDirection = 1
-
     private val bulletSpeed = 20f
-
     private val random = Random()
-
     private var playerLives = 3
 
-    private var isGameOver = false
+    private var currentLevel = 1
+    private val baseEnemySpeed = 2f
+    private val enemySpeedMultiplier = 1.5f // Aumenta la velocidad en un 50% por cada nivel
+    private var enemySpeed = baseEnemySpeed * (1 + (currentLevel - 1) * enemySpeedMultiplier)
 
+    private enum class GameState {
+        START, PLAYING, GAME_OVER, PLAY_AGAIN
+    }
+
+    private var gameState = GameState.START
 
     private val enemyShootHandler: Handler = object : Handler() {
         override fun handleMessage(msg: Message) {
             if (enemies.isNotEmpty()) {
                 val shooter = enemies[random.nextInt(enemies.size)]
-                bullets.add(Pair(RectF(shooter.centerX() - 5, shooter.bottom, shooter.centerX() + 5, shooter.bottom + 20), bulletSpeed)) // Agregar la dirección de la bala
+                bullets.add(
+                    Pair(
+                        RectF(
+                            shooter.centerX() - 5,
+                            shooter.bottom,
+                            shooter.centerX() + 5,
+                            shooter.bottom + 20
+                        ), bulletSpeed
+                    )
+                ) // Agregar la dirección de la bala
                 sendEmptyMessageDelayed(0, (1000..3000).random().toLong())
             }
         }
@@ -47,7 +59,7 @@ class GameView(context: Context) : View(context) {
 
     init {
         paint.color = Color.WHITE
-        player = RectF(400f, 1000f, 500f, 1020f)
+        player = RectF(400f, 2000f, 500f, 2020f) // Cambia 1000f a 1100f y 1020f a 1120f
 
         for (i in 0..4) {
             for (j in 0..9) {
@@ -56,7 +68,6 @@ class GameView(context: Context) : View(context) {
         }
         enemyShootHandler.sendEmptyMessage(0)
     }
-
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         canvas.drawColor(Color.BLACK)
@@ -68,17 +79,55 @@ class GameView(context: Context) : View(context) {
         paint.textSize = 60f
         canvas.drawText("Lives: $playerLives", 50f, height - 50f, paint)
 
-        // Mostrar "Game Over" si el juego ha terminado
-        if (isGameOver) {
-            paint.textSize = 100f
-            canvas.drawText("Game Over", width / 2f, height / 2f, paint)
-            return
+        // Dibujar el nivel actual
+        paint.textSize = 60f
+        canvas.drawText("Level: $currentLevel", width - 300f, height - 50f, paint)
+
+        when (gameState) {
+            GameState.START -> {
+                paint.textSize = 100f
+                val titleText = "Space Invaders"
+                val titleTextWidth = paint.measureText(titleText)
+                val titleTextX = (width - titleTextWidth) / 2f
+                val titleTextY = height / 2f - 100f
+                canvas.drawText(titleText, titleTextX, titleTextY, paint)
+
+                val startText = "Touch to start"
+                val startTextWidth = paint.measureText(startText)
+                val startTextX = (width - startTextWidth) / 2f
+                val startTextY = height / 2f + 200f
+                canvas.drawText(startText, startTextX, startTextY, paint)
+            }
+
+            GameState.GAME_OVER -> {
+                paint.textSize = 100f
+                canvas.drawText("Game Over", width / 2f - 250f, height / 2f, paint)
+            }
+
+            GameState.PLAY_AGAIN -> {
+                paint.textSize = 80f
+                canvas.drawText("Play Again", width / 2f - 220f, height / 2f + 100f, paint)
+            }
+
+            else -> {}
         }
+
         update()
         invalidate()
     }
 
     private fun update() {
+
+        if (gameState != GameState.PLAYING) {
+            return
+
+        }
+        // Verificar si todos los enemigos han sido destruidos
+        if (gameState == GameState.PLAYING && enemies.isEmpty()) {
+            nextLevel()
+        }
+
+
         // Actualizar posición del jugador
         player.offset(playerDirection * playerSpeed, 0f)
 
@@ -179,37 +228,92 @@ class GameView(context: Context) : View(context) {
 
         // Verificar si el jugador se ha quedado sin vidas
         if (playerLives <= 0) {
-            // El jugador se ha quedado sin vidas, mostrar "Game Over"
-            isGameOver = true
+            // El jugador se ha quedado sin vidas, cambiar el estado a "Game Over"
+            gameState = GameState.GAME_OVER
+            enemyShootHandler.removeMessages(0) // Detener disparos de enemigos
         }
-
-
-
-        // Verificar si el jugador se ha quedado sin vidas
-        if (playerLives <= 0) {
-            // El jugador se ha quedado sin vidas, mostrar "Game Over"
-            isGameOver = true
-        }
-
-
-
     }
+
+    private fun restartGame() {
+
+        currentLevel = 1
+        enemySpeed = baseEnemySpeed * (1 + (currentLevel - 1) * enemySpeedMultiplier)
+
+        playerLives = 3
+        gameState = GameState.PLAYING
+
+        // Mover enemigos a su posición inicial
+        enemies.clear()
+        for (i in 0..4) {
+            for (j in 0..9) {
+                enemies.add(RectF(80f + j * 60, 400f + i * 60, 130f + j * 60, 450f + i * 60))
+            }
+        }
+        enemyShootHandler.sendEmptyMessage(0) // Reiniciar el enemyShootHandler
+    }
+
+    private fun nextLevel() {
+        if (currentLevel < 3) { // Limita el juego a 3 niveles
+            currentLevel++
+            enemySpeed = baseEnemySpeed * (1 + (currentLevel - 1) * enemySpeedMultiplier)
+            // Vuelve a generar enemigos
+            enemies.clear()
+            for (i in 0..4) {
+                for (j in 0..9) {
+                    enemies.add(RectF(80f + j * 60, 400f + i * 60, 130f + j * 60, 450f + i * 60))
+                }
+            }
+        } else {
+            gameState = GameState.GAME_OVER
+        }
+    }
+
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.action) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
-                playerDirection = if (event.x > width / 2) {
-                    1
-                } else {
-                    -1
+                if (gameState == GameState.PLAYING) {
+                    playerDirection = if (event.x > width / 2) {
+                        1
+                    } else {
+                        -1
+                    }
                 }
             }
+
             MotionEvent.ACTION_UP -> {
-                playerDirection = 0
-                // Disparar una bala desde el jugador
-                bullets.add(Pair(RectF(player.centerX() - 5, player.top - 20, player.centerX() + 5, player.top), -bulletSpeed)) // Agregar la dirección de la bala
+                when (gameState) {
+                    GameState.START -> {
+                        gameState = GameState.PLAYING
+                    }
+
+                    GameState.PLAYING -> {
+                        playerDirection = 0
+                        // Disparar una bala desde el jugador
+                        bullets.add(
+                            Pair(
+                                RectF(
+                                    player.centerX() - 5,
+                                    player.top - 20,
+                                    player.centerX() + 5,
+                                    player.top
+                                ), -bulletSpeed
+                            )
+                        )
+                    }
+
+                    GameState.GAME_OVER -> {
+                        gameState = GameState.PLAY_AGAIN
+                    }
+
+                    GameState.PLAY_AGAIN -> {
+                        restartGame()
+                    }
+                }
             }
         }
         return true
     }
+
+
 }
