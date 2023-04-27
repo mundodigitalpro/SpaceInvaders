@@ -5,18 +5,20 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
-import android.os.Handler
-import android.os.Message
 import android.view.MotionEvent
 import android.view.View
 import java.util.Random
+import kotlinx.coroutines.*
 
 
 class GameView(context: Context) : View(context) {
     private val paint = Paint()
 
+
     private var player: RectF
     private var enemies = mutableListOf<RectF>()
+    private var misteryEnemy: RectF? = null
+
     private var bullets = mutableListOf<Pair<RectF, Float>>() // Cambiar a una lista de Pares
     private val playerSpeed = 10f
     private var playerDirection = 0
@@ -30,6 +32,11 @@ class GameView(context: Context) : View(context) {
     private val baseEnemySpeed = 2f
     private val enemySpeedMultiplier = 1.5f // Aumenta la velocidad en un 50% por cada nivel
     private var enemySpeed = baseEnemySpeed * (1 + (currentLevel - 1) * enemySpeedMultiplier)
+    private var score = 0
+    private var highScore = 0
+    private val sharedPreferences =
+        context.getSharedPreferences("space_invaders_high_score", Context.MODE_PRIVATE)
+
 
     private enum class GameState {
         START, PLAYING, GAME_OVER, PLAY_AGAIN
@@ -37,43 +44,138 @@ class GameView(context: Context) : View(context) {
 
     private var gameState = GameState.START
 
-    private val enemyShootHandler: Handler = object : Handler() {
-        override fun handleMessage(msg: Message) {
-            if (enemies.isNotEmpty()) {
-                val shooter = enemies[random.nextInt(enemies.size)]
-                bullets.add(
-                    Pair(
-                        RectF(
-                            shooter.centerX() - 5,
-                            shooter.bottom,
-                            shooter.centerX() + 5,
-                            shooter.bottom + 20
-                        ), bulletSpeed
-                    )
-                ) // Agregar la dirección de la bala
-                sendEmptyMessageDelayed(0, (1000..3000).random().toLong())
+    private var enemyShootJob: Job? = null
+
+    //** Inicio de la implementación de obstáculos
+    data class Obstacle(val rect: RectF, var health: Int)
+
+    private val obstacles = mutableListOf<Obstacle>()
+    private fun createObstacles() {
+        obstacles.clear()
+        val obstacleWidth = 60f
+        val obstacleHeight = 40f
+        val horizontalSpacing = 100f
+        val verticalSpacing = 50f
+        val numberOfRows = 2
+        val numberOfColumns = 4
+        val initialHealth = 3
+
+        val totalWidth = numberOfColumns * (obstacleWidth + horizontalSpacing) - horizontalSpacing
+        val startX = (width - totalWidth) / 2
+        val startY = 1800f // Posición vertical de inicio de los obstáculos
+
+        for (i in 0 until numberOfRows) {
+            for (j in 0 until numberOfColumns) {
+                val left = startX + j * (obstacleWidth + horizontalSpacing)
+                val top = startY + i * (obstacleHeight + verticalSpacing)
+                val right = left + obstacleWidth
+                val bottom = top + obstacleHeight
+
+                obstacles.add(Obstacle(RectF(left, top, right, bottom), initialHealth))
             }
         }
     }
 
 
+    private fun drawObstacles(canvas: Canvas) {
+        paint.color = Color.GREEN
+        for (obstacle in obstacles) {
+            if (obstacle.health > 0) {
+                canvas.drawRect(obstacle.rect, paint)
+            }
+        }
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        createObstacles()
+    }
+
+
+    private fun checkBulletObstacleCollisions() {
+        val bulletIterator = bullets.iterator()
+        while (bulletIterator.hasNext()) {
+            val bulletPair = bulletIterator.next()
+            val bullet = bulletPair.first
+            val direction = bulletPair.second
+
+            // Solo considerar balas de los enemigos (dirección hacia abajo)
+            if (direction > 0) {
+                val obstacleHitIndex = obstacles.indexOfFirst { obstacle ->
+                    obstacle.health > 0 && RectF.intersects(obstacle.rect, bullet)
+                }
+
+                if (obstacleHitIndex != -1) {
+                    val obstacle = obstacles[obstacleHitIndex]
+                    obstacle.health -= 1
+                    bulletIterator.remove()
+                }
+            }
+        }
+    }
+
+    //** Fin de la implementación de obstáculos
+
+    private suspend fun enemyShoot() {
+
+        if (enemies.isNotEmpty()) {
+            val shooter = enemies[random.nextInt(enemies.size)]
+            bullets.add(
+                Pair(
+                    RectF(
+                        shooter.centerX() - 5,
+                        shooter.bottom,
+                        shooter.centerX() + 5,
+                        shooter.bottom + 20
+                    ), bulletSpeed
+                )
+            ) // Agregar la dirección de la bala
+        }
+        delay((1000..3000).random().toLong())
+
+    }
+
+
     init {
-        paint.color = Color.WHITE
-        player = RectF(400f, 2000f, 500f, 2020f) // Cambia 1000f a 1100f y 1020f a 1120f
+        // Cargar el high score guardado de SharedPreferences
+        highScore = sharedPreferences.getInt("high_score", 0)
+
+        paint.color = Color.GREEN
+        player = RectF(400f, 2000f, 500f, 2020f)
 
         for (i in 0..4) {
             for (j in 0..9) {
                 enemies.add(RectF(80f + j * 60, 100f + i * 60, 130f + j * 60, 150f + i * 60))
             }
         }
-        enemyShootHandler.sendEmptyMessage(0)
+
+        //** Crear obstáculos
+        createObstacles()
+
+        enemyShootJob = CoroutineScope(Dispatchers.Main).launch {
+            while (true) {
+                enemyShoot()
+            }
+        }
     }
+
+    // Método para guardar el high score en SharedPreferences
+    private fun saveHighScore() {
+        val editor = sharedPreferences.edit()
+        editor.putInt("high_score", highScore)
+        editor.apply()
+    }
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+        paint.color = Color.WHITE
         canvas.drawColor(Color.BLACK)
         canvas.drawRect(player, paint)
         enemies.forEach { enemy -> canvas.drawRect(enemy, paint) }
         bullets.forEach { bullet -> canvas.drawRect(bullet.first, paint) }
+
+        //** Dibujar obstáculos
+        drawObstacles(canvas)
 
         // Dibujar vidas del jugador
         paint.textSize = 60f
@@ -82,6 +184,25 @@ class GameView(context: Context) : View(context) {
         // Dibujar el nivel actual
         paint.textSize = 60f
         canvas.drawText("Level: $currentLevel", width - 300f, height - 50f, paint)
+
+        val textWidthScore = paint.measureText("SCORE: $score")
+
+    // Dibujar el SCORE
+        paint.color = Color.WHITE
+        paint.textSize = 60f
+        canvas.drawText("SCORE: $score", 100f, 100f, paint)
+
+    // Dibujar el HI-SCORE
+        paint.color = Color.WHITE
+        paint.textSize = 60f
+        canvas.drawText("HI-SCORE: $highScore", 200f + textWidthScore + 100f, 100f, paint)
+
+        // Dibujar el Mistery Enemy
+        // Dibujar el rectángulo MisteryEnemy
+        if (misteryEnemy != null) {
+            paint.color = Color.RED
+            canvas.drawRect(misteryEnemy!!, paint)
+        }
 
         when (gameState) {
             GameState.START -> {
@@ -111,7 +232,7 @@ class GameView(context: Context) : View(context) {
 
             else -> {}
         }
-
+        spawnMisteryEnemy()
         update()
         invalidate()
     }
@@ -173,25 +294,31 @@ class GameView(context: Context) : View(context) {
             // Eliminar balas fuera de la pantalla
             if (bullet.top < 0 || bullet.bottom > height) {
                 bulletIterator.remove()
+                continue
             }
-        }
+            // Verificar colisiones entre balas del jugador y enemigos
+            if (direction < 0) {
+                val enemyIterator = enemies.iterator()
+                while (enemyIterator.hasNext()) {
+                    val enemy = enemyIterator.next()
 
-        // Verificar colisiones entre balas del jugador y enemigos
-        val enemyIterator = enemies.iterator()
-        while (enemyIterator.hasNext()) {
-            val enemy = enemyIterator.next()
-            val hitBulletIndex = bullets.indexOfFirst { bulletPair ->
-                val bullet = bulletPair.first
-                val direction = bulletPair.second
-
-                // Solo considerar balas del jugador (dirección hacia arriba)
-                direction < 0 && RectF.intersects(enemy, bullet)
+                    if (RectF.intersects(enemy, bullet)) {
+                        // Eliminar enemigo y bala que lo golpeó
+                        enemyIterator.remove()
+                        bulletIterator.remove()
+                        score += 10
+                        break
+                    }
+                }
             }
-
-            if (hitBulletIndex != -1) {
-                // Eliminar enemigo y bala que lo golpeó
-                enemyIterator.remove()
-                bullets.removeAt(hitBulletIndex)
+            // Verificar colisiones entre balas y obstáculos
+            else {
+                /*                val hitObstacleIndex =
+                                    obstacles.indexOfFirst { obstacle -> RectF.intersects(obstacle.rect, bullet) }
+                                if (hitObstacleIndex != -1) {
+                                    // Eliminar la bala que golpeó el obstáculo
+                                    bulletIterator.remove()
+                                }*/
             }
         }
 
@@ -212,7 +339,6 @@ class GameView(context: Context) : View(context) {
 
         // Verificar si algún enemigo colisiona con el jugador
         val enemyCollision = enemies.any { enemy -> RectF.intersects(player, enemy) }
-
         if (enemyCollision) {
             // Reducir una vida del jugador
             playerLives--
@@ -221,21 +347,44 @@ class GameView(context: Context) : View(context) {
             enemies.clear()
             for (i in 0..4) {
                 for (j in 0..9) {
-                    enemies.add(RectF(80f + j * 60, 400f + i * 60, 130f + j * 60, 450f + i * 60))
+                    enemies.add(
+                        RectF(
+                            80f + j * 60,
+                            400f + i * 60,
+                            130f + j * 60,
+                            450f + i * 60
+                        )
+                    )
                 }
             }
         }
+        //Actualizar el highscore si es necesario
+        if (score > highScore) {
+            highScore = score
+            saveHighScore()
+        }
+
+        // Verificar colisiones entre balas y obstáculos
+        checkBulletObstacleCollisions()
 
         // Verificar si el jugador se ha quedado sin vidas
         if (playerLives <= 0) {
             // El jugador se ha quedado sin vidas, cambiar el estado a "Game Over"
             gameState = GameState.GAME_OVER
-            enemyShootHandler.removeMessages(0) // Detener disparos de enemigos
         }
+// Actualizar la posición del enemigo Mistery
+        misteryEnemy?.offset(if (misteryEnemy!!.left < 0) 3f else -3f, 0f)
+
+// Eliminar el enemigo Mistery si está fuera de la pantalla
+        if (misteryEnemy != null && (misteryEnemy!!.right <= 0 || misteryEnemy!!.left >= width)) {
+            misteryEnemy = null
+        }
+
+
     }
 
     private fun restartGame() {
-
+        score = 0
         currentLevel = 1
         enemySpeed = baseEnemySpeed * (1 + (currentLevel - 1) * enemySpeedMultiplier)
 
@@ -250,7 +399,9 @@ class GameView(context: Context) : View(context) {
                 enemies.add(RectF(80f + j * 60, 100f + i * 60, 130f + j * 60, 150f + i * 60))
             }
         }
-        enemyShootHandler.sendEmptyMessage(0) // Reiniciar el enemyShootHandler
+        // Reiniciar los obstáculos
+        obstacles.clear()
+        createObstacles()
     }
 
     private fun nextLevel() {
@@ -261,11 +412,32 @@ class GameView(context: Context) : View(context) {
             enemies.clear()
             for (i in 0..4) {
                 for (j in 0..9) {
-                    enemies.add(RectF(80f + j * 60, 400f + i * 60, 130f + j * 60, 450f + i * 60))
+                    enemies.add(
+                        RectF(
+                            80f + j * 60,
+                            400f + i * 60,
+                            130f + j * 60,
+                            450f + i * 60
+                        )
+                    )
                 }
             }
+
+            // Reiniciar los obstáculos
+            obstacles.clear()
+            createObstacles()
+
         } else {
             gameState = GameState.GAME_OVER
+        }
+    }
+
+    private fun spawnMisteryEnemy() {
+        if (misteryEnemy == null && random.nextFloat() < 0.01) {
+            val y = 30f
+            val left = if (random.nextBoolean()) -150f else width.toFloat()
+            val right = left + 70f
+            misteryEnemy = RectF(left, y, right, y + 40f)
         }
     }
 
@@ -315,6 +487,4 @@ class GameView(context: Context) : View(context) {
         }
         return true
     }
-
-
 }
