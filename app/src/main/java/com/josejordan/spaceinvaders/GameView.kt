@@ -46,6 +46,9 @@ class GameView(context: Context) : View(context) {
 
     private var enemyShootJob: Job? = null
 
+    private var misteryEnemyDirection = 1f
+
+
     //** Inicio de la implementación de obstáculos
     data class Obstacle(val rect: RectF, var health: Int)
 
@@ -187,12 +190,12 @@ class GameView(context: Context) : View(context) {
 
         val textWidthScore = paint.measureText("SCORE: $score")
 
-    // Dibujar el SCORE
+        // Dibujar el SCORE
         paint.color = Color.WHITE
         paint.textSize = 60f
         canvas.drawText("SCORE: $score", 100f, 100f, paint)
 
-    // Dibujar el HI-SCORE
+        // Dibujar el HI-SCORE
         paint.color = Color.WHITE
         paint.textSize = 60f
         canvas.drawText("HI-SCORE: $highScore", 200f + textWidthScore + 100f, 100f, paint)
@@ -372,12 +375,26 @@ class GameView(context: Context) : View(context) {
             // El jugador se ha quedado sin vidas, cambiar el estado a "Game Over"
             gameState = GameState.GAME_OVER
         }
-// Actualizar la posición del enemigo Mistery
-        misteryEnemy?.offset(if (misteryEnemy!!.left < 0) 3f else -3f, 0f)
+        // Actualizar la posición del enemigo Mistery
+        //misteryEnemy?.offset(if (misteryEnemy!!.left < 0) 3f else -3f, 0f)
 
-// Eliminar el enemigo Mistery si está fuera de la pantalla
-        if (misteryEnemy != null && (misteryEnemy!!.right <= 0 || misteryEnemy!!.left >= width)) {
-            misteryEnemy = null
+        misteryEnemy?.offset(misteryEnemyDirection * 3f, 0f)
+
+
+        // Eliminar el enemigo Mistery si está fuera de la pantalla
+        /*
+                if (misteryEnemy != null && (misteryEnemy!!.right <= 0 || misteryEnemy!!.left >= width)) {
+                    misteryEnemy = null
+                }
+        */
+
+        if (misteryEnemy != null) {
+            if (misteryEnemy!!.left <= 0) {
+                misteryEnemyDirection = 1f
+            } else if (misteryEnemy!!.right >= width) {
+                misteryEnemyDirection = -1f
+                misteryEnemy = null
+            }
         }
 
 
